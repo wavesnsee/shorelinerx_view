@@ -9,7 +9,7 @@ def read(ls: list, r_ids, f_aoi, plot_td: bool, odir: Path):
     '''
 
     # create list of pystac objects
-    items = [pystac.Item.from_file(f) for f in ls][0:10]
+    items = [pystac.Item.from_file(f) for f in ls]
 
     # read waterlines
     gdf = waterline.read(items)
