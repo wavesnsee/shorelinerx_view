@@ -157,6 +157,8 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
     slider.js_on_change("value", callback)
     layer_buttons.js_on_change("active", callback)
 
+    p.xaxis.major_label_text_font_size = p.yaxis.major_label_text_font_size = '0pt'
+
     out = odir.joinpath(f"{f_out_prefix}.html")
     output_file(out, title='sx view')
     print(f"\n --> {out} \n")
