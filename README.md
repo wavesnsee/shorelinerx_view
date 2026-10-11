@@ -6,10 +6,11 @@ and threshold diagram.
 ## Installation
 
 Install as a uv tool
+
 `uv tool install "sx_view @ git+ssh://git@github.com/wavesnsee/shorelinerx_viex.git@main"`
 
 ## Usage
-sx_view myfile.yaml
+`sx_view myfile.yaml`
 
 ## yaml
-To see an example of yaml parameters, see file *src/sx_view/cli/yaml/landsat_narrabeen.yaml*
+To see an example of yaml parameters, see file **src/sx_view/cli/yaml/landsat_narrabeen.yaml**
