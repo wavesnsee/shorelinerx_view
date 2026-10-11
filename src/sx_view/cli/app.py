@@ -18,6 +18,7 @@ class AppConfig(BaseModel):
     wl_dir: Path
     f_aoi: Path
     rasters: Rasters
+    plot_td: bool
     odir: Path
 
 def load_config(path: str) -> AppConfig:

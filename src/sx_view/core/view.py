@@ -4,9 +4,10 @@ import geopandas
 import numpy as np
 from bokeh.plotting import figure, output_file, save
 from bokeh.models import ColumnDataSource, Slider, Div, CustomJS, RadioButtonGroup
-from bokeh.layouts import column
+from bokeh.layouts import column, row
 
 from sx_view.core import stac
+from sx_view.core.thr_diagram import read_svg, pack
 from sx_view.core.geo_utils import raster_to_rgba_mercator
 
 
@@ -15,8 +16,7 @@ def _missing(r):
     return r is None or (isinstance(r, float) and np.isnan(r))
 
 
-
-def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
+def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bool,
          r_ids: list[str] | None = None, cmaps: dict | None = None,
          vlims: dict | None = None, max_px: int = 800):
     """
@@ -35,6 +35,14 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
     gdf = gdf.sort_values("date").reset_index(drop=True)
     gdf_m = gdf.to_crs(3857)
     labels = [f"{d} - {m}" for d, m in zip(gdf["date"].astype(str), gdf["mission"])]
+
+    if plot_td:
+        svgs = [pack(read_svg(s)) for s in gdf['f_td']]
+        svg_div = Div(text=read_svg(gdf.iloc[0]['f_td']), width=450)
+    else:
+        svgs = None
+        svg_div = None
+
 
     # --- Lines
     xs, ys, idx, label_col = [], [], [], []
@@ -87,7 +95,7 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
     # --- Figure
     padx, pady = 0.05 * (maxx - minx), 0.05 * (maxy - miny)
     p = figure(
-        title="shorelinerx waterlines", width=1536, height=864,
+        title="shorelinerx waterlines", width=1000, height=864,
         x_axis_type="mercator", y_axis_type="mercator",
         x_range=(minx - padx, maxx + padx), y_range=(miny - pady, maxy + pady),
         match_aspect=True, tooltips=[("date - mission", "@label")],
@@ -103,11 +111,24 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
                     title=None, width=600)
     layer_buttons = RadioButtonGroup(labels=layers, active=0)   # rgb by default
 
+    if plot_td:
+        js_td = """
+        if (svgs.length) {
+            const token = (window.__svgToken = (window.__svgToken || 0) + 1);
+            const bytes = Uint8Array.from(atob(svgs[i]), c => c.charCodeAt(0));
+            new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")))
+                .text()
+                .then(t => { if (token === window.__svgToken) svg_div.text = t; });
+        }
+        """
+    else:
+        js_td = ''
+
     callback = CustomJS(
         args=dict(source_all=source_all, source_vis=source_vis,
                   source_img_all=source_img_all, source_img_vis=source_img_vis,
                   slider=slider, buttons=layer_buttons,
-                  label=label, labels=labels, layers=layers),
+                  label=label, labels=labels, layers=layers, svg_div=svg_div, svgs=svgs or []),
         code="""
         const i = slider.value;
         const layer = layers[buttons.active];
@@ -128,8 +149,10 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
             dw: [b[layer + "__dw"][i]], dh: [b[layer + "__dh"][i]],
         };
 
+        %s
+        
         label.text = "<b>" + labels[i] + " — " + layer + "</b>";
-        """,
+        """%(js_td),
     )
     slider.js_on_change("value", callback)
     layer_buttons.js_on_change("active", callback)
@@ -137,20 +160,23 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str,
     out = odir.joinpath(f"{f_out_prefix}.html")
     output_file(out, title='sx view')
     print(f"\n --> {out} \n")
-    save(column(layer_buttons, slider, label, p))
+    if plot_td:
+        save(column(layer_buttons, slider, label, row(p,svg_div)))
+    else:
+        save(column(layer_buttons, slider, label, p))
 
     return
 
 
-def run(wl_dir: Path, f_aoi: Path, r_ids: list, f_out_prefix: str, odir: Path):
+def run(wl_dir: Path, f_aoi: Path, r_ids: list, f_out_prefix: str, plot_td: bool, odir: Path):
 
     # list of stac items
     ls = sorted(wl_dir.rglob('stac-item.json'))
 
     # read stac items
-    gdf = stac.read(ls, r_ids, f_aoi, odir)
+    gdf = stac.read(ls, r_ids, f_aoi, plot_td, odir)
 
     # plot waterlines, rasters, ans ESRI tile
-    plot(gdf, odir, f_out_prefix, r_ids=r_ids, cmaps={'index': 'Greys', 'mask_clouds': 'gist_gray'})
+    plot(gdf, odir, f_out_prefix, plot_td, r_ids=r_ids, cmaps={'index': 'Greys', 'mask_clouds': 'gist_gray'})
 
     return

@@ -8,5 +8,6 @@ def viewer(conf):
         conf.f_aoi,
         conf.rasters.ids,
         conf.f_out_prefix,
+        conf.plot_td,
         conf.odir
     )
