@@ -3,8 +3,10 @@
 This project is dedicated to plot shorelinerx waterlines in parallel with optional raster data (RGB, index, mask_clouds) 
 and threshold diagram.
 
-# Installation
+## Installation
 
 `uv venv`
 
 `uv sync`
+
+## Usage

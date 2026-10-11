@@ -1,5 +1,5 @@
 [project]
-name = "sx-view"
+name = "sx_view"
 version = "0.1.0"
 description = "Viewer of shorelinerx waterlines"
 readme = "README.md"
@@ -24,4 +24,4 @@ requires = ["uv_build>=0.8.22,<0.9.0"]
 build-backend = "uv_build"
 
 [project.scripts]
-editing = "sx_view.cli.app:app"
+sx_view = "sx_view.cli.app:app"
