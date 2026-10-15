@@ -3,7 +3,7 @@ from pathlib import Path
 import geopandas
 import numpy as np
 from bokeh.plotting import figure, output_file, save
-from bokeh.models import ColumnDataSource, Slider, Div, CustomJS, RadioButtonGroup
+from bokeh.models import ColumnDataSource, Slider, Div, CustomJS, RadioButtonGroup, Toggle
 from bokeh.layouts import column, row
 
 from sx_view.core import stac
@@ -103,7 +103,11 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
     p.add_tile("Esri.WorldImagery")
     p.grid.visible = False
     p.image_rgba("image", x="x", y="y", dw="dw", dh="dh", source=source_img_vis)
-    p.multi_line("xs", "ys", source=source_vis, line_color="red", line_width=2)
+    wl = p.multi_line("xs", "ys", source=source_vis, line_color="red", line_width=2)
+
+    # toggle waterline
+    line_toggle = Toggle(label="Waterline", active=True, button_type="success", width=120)
+    line_toggle.js_link("active", wl, "visible")
 
     # --- Widgets
     label = Div(text=f"<b>{labels[0]} — {layers[0]}</b>", styles={"font-size": "16px"})
@@ -163,9 +167,9 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
     output_file(out, title='sx view')
     print(f"\n --> {out} \n")
     if plot_td:
-        save(column(layer_buttons, slider, label, row(p,svg_div)))
+        save(column(row(layer_buttons, line_toggle), slider, label, row(p,svg_div)))
     else:
-        save(column(layer_buttons, slider, label, p))
+        save(column(row(layer_buttons, line_toggle), slider, label, p))
 
     return
 
