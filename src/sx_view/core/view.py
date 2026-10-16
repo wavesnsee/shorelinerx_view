@@ -8,7 +8,7 @@ from bokeh.layouts import column, row
 
 from sx_view.core import stac
 from sx_view.core.thr_diagram import read_svg, pack
-from sx_view.core.geo_utils import raster_to_rgba_mercator
+from sx_view.core.geo_utils import raster_to_rgba_mercator, mask_to_rgba_mercator
 
 
 
@@ -16,7 +16,7 @@ def _missing(r):
     return r is None or (isinstance(r, float) and np.isnan(r))
 
 
-def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bool,
+def plot_save(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bool,
          r_ids: list[str] | None = None, cmaps: dict | None = None,
          vlims: dict | None = None, max_px: int = 800):
     """
@@ -174,10 +174,216 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
     return
 
 
+def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bool,
+              r_ids: list[str] | None = None, cmaps: dict | None = None,
+              vlims: dict | None = None, max_px: int = 800,
+
+         ):
+    """
+    r_ids : names of the extra raster columns (single band)
+    cmaps : optional {column: matplotlib colormap name}, default viridis
+    vlims : optional {column: (vmin, vmax)}, default 2-98% stretch per image
+    """
+    r_ids = r_ids or []
+    cmaps = cmaps or {}
+    vlims = vlims or {}
+    layers = ["rgb"] + [r for r in r_ids if r != "rgb"]
+
+    if gdf.crs is None:
+        raise ValueError("gdf has no CRS, cannot reproject to Web Mercator")
+
+    gdf = gdf.sort_values("date").reset_index(drop=True)
+    gdf_m = gdf.to_crs(3857)
+    labels = [f"{d} - {m}" for d, m in zip(gdf["date"].astype(str), gdf["mission"])]
+
+    if plot_td:
+        svgs = [pack(read_svg(s)) for s in gdf['f_td']]
+        svg_div = Div(text=read_svg(gdf.iloc[0]['f_td']), width=450)
+    else:
+        svgs = None
+        svg_div = None
+
+    # --- Lines
+    xs, ys, idx, label_col = [], [], [], []
+    for i, geom in enumerate(gdf_m.geometry):
+        if geom is None or geom.is_empty:
+            continue
+        lines = geom.geoms if geom.geom_type == "MultiLineString" else [geom]
+        for line in lines:
+            x, y = line.xy
+            xs.append(list(x));
+            ys.append(list(y))
+            idx.append(i);
+            label_col.append(labels[i])
+
+    source_all = ColumnDataSource(dict(xs=xs, ys=ys, idx=idx, label=label_col))
+    first = [k for k, i in enumerate(idx) if i == 0]
+    source_vis = ColumnDataSource(dict(
+        xs=[xs[k] for k in first], ys=[ys[k] for k in first],
+        label=[label_col[k] for k in first]))
+
+    # --- Rasters: for each layer, one RGBA image per shoreline
+    minx, miny, maxx, maxy = gdf_m.total_bounds
+    empty = (np.zeros((1, 1), dtype="uint32"), minx, miny, 1.0, 1.0)
+
+    img_data = {}
+    for layer in layers:
+        imgs, ix, iy, idw, idh = [], [], [], [], []
+        for r in gdf[layer]:
+            if _missing(r):
+                img, l, b, dw, dh = empty
+            else:
+                img, l, b, dw, dh = raster_to_rgba_mercator(
+                    r,
+                    mode="rgb" if layer == "rgb" else "single",
+                    cmap=cmaps.get(layer, "viridis"),
+                    vlim=vlims.get(layer),
+                    max_px=max_px,
+                )
+                minx, miny = min(minx, l), min(miny, b)
+                maxx, maxy = max(maxx, l + dw), max(maxy, b + dh)
+            imgs.append(img);
+            ix.append(l);
+            iy.append(b);
+            idw.append(dw);
+            idh.append(dh)
+        img_data.update({f"{layer}__image": imgs, f"{layer}__x": ix, f"{layer}__y": iy,
+                         f"{layer}__dw": idw, f"{layer}__dh": idh})
+
+    source_img_all = ColumnDataSource(img_data)
+    l0 = layers[0]
+    source_img_vis = ColumnDataSource(dict(
+        image=[img_data[f"{l0}__image"][0]], x=[img_data[f"{l0}__x"][0]],
+        y=[img_data[f"{l0}__y"][0]], dw=[img_data[f"{l0}__dw"][0]],
+        dh=[img_data[f"{l0}__dh"][0]]))
+
+    # --- Cloud masks: one RGBA overlay per shoreline
+    cloud_col = 'mask_clouds'
+    c_imgs, cx, cy, cdw, cdh = [], [], [], [], []
+    for r in gdf[cloud_col]:
+        if _missing(r):
+            img, l, b, dw, dh = empty
+        else:
+            img, l, b, dw, dh = mask_to_rgba_mercator(
+                r,
+                max_px=max_px)
+            minx, miny = min(minx, l), min(miny, b)
+            maxx, maxy = max(maxx, l + dw), max(maxy, b + dh)
+        c_imgs.append(img);
+        cx.append(l);
+        cy.append(b);
+        cdw.append(dw);
+        cdh.append(dh)
+
+    source_cloud_all = ColumnDataSource(dict(image=c_imgs, x=cx, y=cy, dw=cdw, dh=cdh))
+    source_cloud_vis = ColumnDataSource(dict(image=[c_imgs[0]], x=[cx[0]], y=[cy[0]], dw=[cdw[0]], dh=[cdh[0]]))
+
+
+    # --- Figure
+    padx, pady = 0.05 * (maxx - minx), 0.05 * (maxy - miny)
+    p = figure(
+        title="shorelinerx waterlines", width=1000, height=864,
+        x_axis_type="mercator", y_axis_type="mercator",
+        x_range=(minx - padx, maxx + padx), y_range=(miny - pady, maxy + pady),
+        match_aspect=True, tooltips=[("date - mission", "@label")],
+    )
+    p.add_tile("Esri.WorldImagery")
+    p.grid.visible = False
+    p.image_rgba("image", x="x", y="y", dw="dw", dh="dh", source=source_img_vis)
+    cloud_r = p.image_rgba("image", x="x", y="y", dw="dw", dh="dh",
+                           source=source_cloud_vis, visible=True)  # visible by default
+    cloud_toggle = Toggle(label="Clouds", active=True, button_type="primary", width=120)
+    cloud_toggle.js_link("active", cloud_r, "visible")
+
+
+    wl = p.multi_line("xs", "ys", source=source_vis, line_color="red", line_width=2)
+
+    # toggle waterline
+    line_toggle = Toggle(label="Waterline", active=True, button_type="primary", width=120)
+    line_toggle.js_link("active", wl, "visible")
+
+    toggles = [line_toggle] + [cloud_toggle]
+
+    # --- Widgets
+    label = Div(text=f"<b>{labels[0]} — {layers[0]}</b>", styles={"font-size": "16px"})
+    slider = Slider(start=0, end=len(gdf) - 1, value=0, step=1,
+                    title=None, width=600)
+    layer_buttons = RadioButtonGroup(labels=layers, active=0)  # rgb by default
+
+    if plot_td:
+        js_td = """
+        if (svgs.length) {
+            const token = (window.__svgToken = (window.__svgToken || 0) + 1);
+            const bytes = Uint8Array.from(atob(svgs[i]), c => c.charCodeAt(0));
+            new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")))
+                .text()
+                .then(t => { if (token === window.__svgToken) svg_div.text = t; });
+        }
+        """
+    else:
+        js_td = ''
+
+    callback = CustomJS(
+        args=dict(source_all=source_all, source_vis=source_vis,
+                  source_img_all=source_img_all, source_img_vis=source_img_vis,
+                  source_cloud_all=source_cloud_all, source_cloud_vis=source_cloud_vis,
+                  slider=slider, buttons=layer_buttons,
+                  label=label, labels=labels, layers=layers, svg_div=svg_div, svgs=svgs or []),
+        code="""
+        const i = slider.value;
+        const layer = layers[buttons.active];
+
+        // waterline
+        const a = source_all.data;
+        const xs = [], ys = [], lab = [];
+        for (let k = 0; k < a.idx.length; k++) {
+            if (a.idx[k] === i) { xs.push(a.xs[k]); ys.push(a.ys[k]); lab.push(a.label[k]); }
+        }
+        source_vis.data = {xs: xs, ys: ys, label: lab};
+
+        // raster of the selected layer
+        const b = source_img_all.data;
+        source_img_vis.data = {
+            image: [b[layer + "__image"][i]],
+            x: [b[layer + "__x"][i]], y: [b[layer + "__y"][i]],
+            dw: [b[layer + "__dw"][i]], dh: [b[layer + "__dh"][i]],
+        };
+
+        %s
+        
+         // cloud mask
+        if (source_cloud_all) {
+            const c = source_cloud_all.data;
+            source_cloud_vis.data = {
+                image: [c.image[i]], x: [c.x[i]], y: [c.y[i]],
+                dw: [c.dw[i]], dh: [c.dh[i]],
+            };
+        }
+        label.text = "<b>" + labels[i] + " — " + layer + "</b>";
+        
+        
+        """ % (js_td),
+    )
+    slider.js_on_change("value", callback)
+    layer_buttons.js_on_change("active", callback)
+
+    p.xaxis.major_label_text_font_size = p.yaxis.major_label_text_font_size = '0pt'
+
+    out = odir.joinpath(f"{f_out_prefix}.html")
+    output_file(out, title='sx view')
+    print(f"\n --> {out} \n")
+    if plot_td:
+        save(column(row(layer_buttons, *toggles), slider, label, row(p, svg_div)))
+    else:
+        save(column(row(layer_buttons, *toggles), slider, label, p))
+
+    return
+
+
 def run(wl_dir: Path, f_aoi: Path, r_ids: list, f_out_prefix: str, plot_td: bool, odir: Path):
 
     # list of stac items
-    ls = sorted(wl_dir.rglob('stac-item.json'))
+    ls = sorted(wl_dir.rglob('stac-item.json'))[0:15]
 
     # read stac items
     gdf = stac.read(ls, r_ids, f_aoi, plot_td, odir)

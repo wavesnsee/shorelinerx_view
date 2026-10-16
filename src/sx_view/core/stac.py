@@ -14,6 +14,9 @@ def read(ls: list, r_ids, f_aoi, plot_td: bool, odir: Path):
     # read waterlines
     gdf = waterline.read(items)
 
+    # add mask_clouds to raster to read
+    r_ids.append('mask_clouds')
+
     # read rasters
     rs = raster.read(items, r_ids, f_aoi, odir)
 
@@ -32,5 +35,8 @@ def read(ls: list, r_ids, f_aoi, plot_td: bool, odir: Path):
 
     # clip gdf to aoi
     gdf = geo_utils.clip_gdf(gdf, f_aoi)
+
+    # pop mask_clouds from r_ids
+    r_ids.pop(-1)
 
     return gdf

@@ -53,6 +53,62 @@ def apply_mask(ls_r, roi, nodata, odir_masked):
     return ls_r_masked
 
 
+def raster_to_rgba_mercator_save(src, mode="rgb", cmap="viridis", vlim=None,
+                            max_px=1000, low=2, high=98):
+    """Reproject a raster to EPSG:3857 -> (rgba_uint32, left, bottom, width, height).
+    mode="rgb": bands 1-3 as true color. mode="single": band 1 through a colormap."""
+
+    DST_CRS = "EPSG:3857"
+
+    transform, w, h = calculate_default_transform(
+        src.crs, DST_CRS, src.width, src.height, *src.bounds)
+    f = max(w, h) / max_px
+    if f > 1:  # downsample to keep the HTML light
+        transform, w, h = calculate_default_transform(
+            src.crs, DST_CRS, src.width, src.height, *src.bounds,
+            dst_width=int(round(w / f)), dst_height=int(round(h / f)))
+
+    nb = 3 if mode == "rgb" else 1
+    dst = np.full((nb, h, w), np.nan, dtype="float32")
+    for b in range(nb):
+        reproject(
+            source=rasterio.band(src, b + 1), destination=dst[b],
+            src_transform=src.transform, src_crs=src.crs, src_nodata=src.nodata,
+            dst_transform=transform, dst_crs=DST_CRS, dst_nodata=np.nan,
+            resampling=Resampling.bilinear if mode == "rgb" else Resampling.nearest,
+        )
+
+    valid = np.isfinite(dst).all(axis=0)
+
+    if mode == "rgb":
+        valid &= np.nan_to_num(dst).sum(axis=0) > 0
+        if src.dtypes[0] == "uint8":
+            rgb8 = np.nan_to_num(dst).astype("uint8")
+        else:  # float / uint16: percentile stretch per band
+            rgb8 = np.zeros(dst.shape, dtype="uint8")
+            for b in range(3):
+                if valid.any():
+                    lo, hi = np.nanpercentile(dst[b][valid], (low, high))
+                    rgb8[b] = np.clip((np.nan_to_num(dst[b]) - lo) / max(hi - lo, 1e-9), 0, 1) * 255
+        rgba = np.dstack([rgb8[0], rgb8[1], rgb8[2], (valid * 255).astype("uint8")])
+    else:
+        band = dst[0]
+        if vlim is None:
+            lo, hi = np.nanpercentile(band[valid], (low, high)) if valid.any() else (0, 1)
+        else:
+            lo, hi = vlim
+        norm = np.clip((np.nan_to_num(band) - lo) / max(hi - lo, 1e-9), 0, 1)
+        rgba = (colormaps[cmap](norm) * 255).astype("uint8")   # (h, w, 4)
+        rgba[..., 3] = (valid * 255).astype("uint8")
+
+    rgba = np.ascontiguousarray(np.flipud(rgba))               # bokeh origin = bottom-left
+    img = rgba.view("uint32").reshape(h, w)
+
+    left, top = transform.c, transform.f
+    right, bottom = left + w * transform.a, top + h * transform.e
+    return img, left, bottom, right - left, top - bottom
+
+
 def raster_to_rgba_mercator(src, mode="rgb", cmap="viridis", vlim=None,
                             max_px=1000, low=2, high=98):
     """Reproject a raster to EPSG:3857 -> (rgba_uint32, left, bottom, width, height).
@@ -102,6 +158,43 @@ def raster_to_rgba_mercator(src, mode="rgb", cmap="viridis", vlim=None,
         rgba[..., 3] = (valid * 255).astype("uint8")
 
     rgba = np.ascontiguousarray(np.flipud(rgba))               # bokeh origin = bottom-left
+    img = rgba.view("uint32").reshape(h, w)
+
+    left, top = transform.c, transform.f
+    right, bottom = left + w * transform.a, top + h * transform.e
+    return img, left, bottom, right - left, top - bottom
+
+
+def mask_to_rgba_mercator(src, color=(0, 255, 255), alpha=190, bits=None, max_px=800):
+    """Reproject a mask raster to EPSG:3857 -> (rgba_uint32, left, bottom, width, height).
+    Only masked pixels are drawn (colored, semi-transparent); the rest is fully transparent.
+    bits: optional bitmask (e.g. 0b11000 = 24) applied on a bit-packed band like qa_pixel."""
+
+    DST_CRS = "EPSG:3857"
+
+    transform, w, h = calculate_default_transform(
+        src.crs, DST_CRS, src.width, src.height, *src.bounds)
+    f = max(w, h) / max_px
+    if f > 1:
+        transform, w, h = calculate_default_transform(
+            src.crs, DST_CRS, src.width, src.height, *src.bounds,
+            dst_width=int(round(w / f)), dst_height=int(round(h / f)))
+
+    dst = np.full((h, w), np.nan, dtype="float32")
+    reproject(
+        source=rasterio.band(src, 1), destination=dst,
+        src_transform=src.transform, src_crs=src.crs, src_nodata=src.nodata,
+        dst_transform=transform, dst_crs=DST_CRS, dst_nodata=np.nan,
+        resampling=Resampling.nearest,            # never interpolate a mask
+    )
+
+    v = np.nan_to_num(dst).astype("uint32")
+    masked = ((v & bits) > 0) if bits else (v > 0)
+    masked &= np.isfinite(dst)
+
+    rgba = np.zeros((h, w, 4), dtype="uint8")
+    rgba[masked] = (*color, alpha)
+    rgba = np.ascontiguousarray(np.flipud(rgba))  # bokeh origin = bottom-left
     img = rgba.view("uint32").reshape(h, w)
 
     left, top = transform.c, transform.f
