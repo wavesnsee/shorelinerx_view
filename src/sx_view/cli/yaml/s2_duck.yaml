@@ -1,7 +1,7 @@
 wl_dir: '/home/florent/workspaces/florent/Projects/Shoreliner_CNES/runs/s2/duck/output/waterlines/' # directory of shorelinerx waterlines
 f_aoi: '/home/florent/workspaces/florent/Projects/Shoreliner_CNES/view/aoi/aoi_duck.gpkg' # area of interest in which to clip raster data
 rasters:
-  ids: ['rgb', 'index', 'mask_clouds'] # ['rgb', 'index', 'mask_clouds'] choose what types of rasters to plot
+  ids: ['rgb', 'index'] # ['rgb', 'index'] choose what types of rasters to plot
 plot_td: true # boolean to plot or not threshold diagram
 odir: '/home/florent/workspaces/florent/Projects/Shoreliner_CNES/view/' # output directory for viewing results
 f_out_prefix: 'duck_s2'
