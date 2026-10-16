@@ -383,7 +383,7 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
 def run(wl_dir: Path, f_aoi: Path, r_ids: list, f_out_prefix: str, plot_td: bool, odir: Path):
 
     # list of stac items
-    ls = sorted(wl_dir.rglob('stac-item.json'))[0:15]
+    ls = sorted(wl_dir.rglob('stac-item.json'))
 
     # read stac items
     gdf = stac.read(ls, r_ids, f_aoi, plot_td, odir)
