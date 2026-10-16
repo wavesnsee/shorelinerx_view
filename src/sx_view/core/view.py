@@ -198,7 +198,7 @@ def plot(gdf: geopandas.GeoDataFrame, odir: Path, f_out_prefix: str, plot_td: bo
 
     if plot_td:
         svgs = [pack(read_svg(s)) for s in gdf['f_td']]
-        svg_div = Div(text=read_svg(gdf.iloc[0]['f_td']), width=450)
+        svg_div = Div(text=read_svg(gdf.iloc[0]['f_td']), width=700)
     else:
         svgs = None
         svg_div = None
