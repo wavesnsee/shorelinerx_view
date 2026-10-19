@@ -389,6 +389,8 @@ def run(wl_dir: Path, f_aoi: Path, r_ids: list, f_out_prefix: str, plot_td: bool
     gdf = stac.read(ls, r_ids, f_aoi, plot_td, odir)
 
     # plot waterlines, rasters, ans ESRI tile
-    plot(gdf, odir, f_out_prefix, plot_td, r_ids=r_ids, cmaps={'index': 'Greys', 'mask_parity': 'gist_gray'})
+    plot(gdf, odir, f_out_prefix, plot_td, r_ids=r_ids,
+         vlims={"mask_parity": (0, 1)},
+         cmaps={'index': 'Greys', 'mask_parity': 'gist_gray', 'mask_clouds': 'gist_gray'})
 
     return
