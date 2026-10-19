@@ -165,7 +165,7 @@ def raster_to_rgba_mercator(src, mode="rgb", cmap="viridis", vlim=None,
     return img, left, bottom, right - left, top - bottom
 
 
-def mask_to_rgba_mercator(src, color=(0, 255, 255), alpha=190, bits=None, max_px=800):
+def mask_to_rgba_mercator(src, color=(255, 0, 255), alpha=255, bits=None, max_px=800):
     """Reproject a mask raster to EPSG:3857 -> (rgba_uint32, left, bottom, width, height).
     Only masked pixels are drawn (colored, semi-transparent); the rest is fully transparent.
     bits: optional bitmask (e.g. 0b11000 = 24) applied on a bit-packed band like qa_pixel."""
